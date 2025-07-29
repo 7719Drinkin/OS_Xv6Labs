@@ -140,6 +140,7 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  p->tracemask = 0; // 新的进程默认不追踪sys call
 
   return p;
 }
@@ -300,6 +301,9 @@ fork(void)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
+
+  // fork出的新进程继承父进程的bit mask
+  np->tracemask = p->tracemask;
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
@@ -653,4 +657,21 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// Count how many processes are not in the state of UNUSED
+uint64
+count_free_proc(void) {
+  struct proc *p;
+  uint64 count = 0;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    // 此处不一定需要加锁, 因为该函数是只读不写
+    // 但proc.c里其他类似的遍历时都加了锁, 那我们也加上
+    acquire(&p->lock);
+    if(p->state != UNUSED) {
+      count += 1;
+    }
+    release(&p->lock);
+  }
+  return count;
 }
