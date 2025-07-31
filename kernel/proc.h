@@ -104,5 +104,6 @@ struct proc {
   struct context context;      // swtch() here to run process
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
+  struct usyscall *usyscall;   // share with kernel << 添加一个共享内存块的物理地址
   char name[16];               // Process name (debugging)
 };

@@ -432,3 +432,34 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+// Recursively print the page table entries for the given pagetable at the specified level.
+// Used for debugging and understanding the page table structure.
+void
+printwalk(pagetable_t pagetable, uint level)
+{
+  char* prefix;
+  if (level == 2) prefix = "..";
+  else if (level == 1) prefix = ".. ..";
+  else prefix = ".. .. ..";
+  for(int i = 0; i < 512; i++){ // 每个页表有512项
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){ // 该页表项有效
+      uint64 pa = PTE2PA(pte); // 将虚拟地址转换为物理地址
+      printf("%s%d: pte %p pa %p\n", prefix, i, pte, pa);
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){ // 有下一级页表
+         printwalk((pagetable_t)pa, level - 1);
+      }
+    }
+  }
+}
+
+
+// Print the page table for debugging.
+void
+vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+  printwalk(pagetable, 2);
+}
+
+
