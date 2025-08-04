@@ -1,0 +1,32 @@
+  > Which registers contain arguments to functions? For example, which register    holds 13 in main's call to `printf`?
+   寄存器`a2`存放了`13`这个值
+  > Where is the call to function f in the assembly code for main? 
+   一整个函数调用链`f(g(8))+1`都被编译器直接优化成inline了并算出了答案`12`, 放置在了`a1`寄存器里。
+      由这一行汇编源码可以看出:
+      ```asm
+      26:	45b1                	li	a1,12
+      ```
+  > Where is the call to g? (Hint: the compiler may inline functions.)
+   由这一行汇编源码:
+      ```asm
+       0000000000000638 <printf>
+      ```
+      我们可以得知printf在0x638的位置
+  > At what address is the function printf located?
+   jalr`这个指令会把下一个要执行的指令的地址压入`ra`, 即`0x34+4 = 0x38`
+  > What value is in the register ra just after the jalr to printf in main?
+   输出的答案是 `HE110 World`
+       `57616`的`hex`是`0x0000E110`
+       `i=0x00646c72`, 字节翻译是`0dlr`. 因为RISC-V是little-endian, 存放在连续内存里的顺序即是`rld0`.
+       如果RISC-V是big-endian, `57616`不用变, `i`需要变成`0x726c6400`
+  > Run the following code.
+    `
+        unsigned int i = 0x00646c72;
+        printf("H%x Wo%s", 57616, &i);
+    `
+  What is the output? Here's an ASCII table that maps bytes to characters.
+  The output depends on that fact that the RISC-V is little-endian. If the RISC-V were instead big-endian what would you set to in order to yield the same output? Would you need to change to a different value?`i57616`
+  Here's a description of little- and big-endian and a more whimsical description.
+  In the following code, what is going to be printed after ? (note: the answer is not a specific value.) Why does this happen? `'y='`
+	`printf("x=%d y=%d", 3);`
+   `printf`的format字符串在寄存器`a0`, `3`在寄存器`a1`, 所以当试图`print y`的时候, 留在寄存器`a2`的某个随机值就会被`print`出来.

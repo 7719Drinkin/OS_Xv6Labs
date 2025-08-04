@@ -105,4 +105,13 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  
+  // alarm
+  uint64 tracemask;            // the sys calls this proc is tracing
+  pagetable_t kpagetable;      // the kernel table per process
+  struct trapframe *alarmframe;// data page to restore all register when going back from alarm handler
+  int alarm_period;            // the alarm period set
+  void (*alarm_handler)();     // the alarm function handler
+  int ticks_since_last_alarm;  // how many ticks has elapsed since last alarm
+  int inalarm;                 // if the alarm handler is going on
 };
