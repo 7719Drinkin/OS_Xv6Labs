@@ -303,7 +303,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -311,14 +310,12 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    *pte &= ~PTE_W;  // 变为只读页面, 不允许写. 一旦试图写, 会触发num=15的trap
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    adjustref(pa, 1); // 增加计数器
   }
   return 0;
 
@@ -350,6 +347,22 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    if (va0 >= MAXVA) {
+      printf("copyout: va exceeds MAXVA\n");
+      return -1;
+    }
+    pte_t *pte = walk(pagetable, va0, 0);
+    if (pte == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_V) == 0) {
+      printf("copyout: invalid pte\n");
+      return -1;
+    }
+    if ((*pte & PTE_W) == 0) {
+      // 写的目的地是COW共享页, 需要复制一份
+      if (cowalloc(pagetable, va0) < 0) {
+        return -1;
+      }
+    }
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
@@ -431,4 +444,30 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int
+cowalloc(pagetable_t pagetable, uint64 va) {
+  if (va >= MAXVA) {
+    printf("cowalloc: exceeds MAXVA\n");
+    return -1;
+  }
+
+  pte_t* pte = walk(pagetable, va, 0); // should refer to a shared PA
+  if (pte == 0) {
+    panic("cowalloc: pte not exists");
+  }
+  if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0) {
+    panic("cowalloc: pte permission err");
+  }
+  uint64 pa_new = (uint64)kalloc();
+  if (pa_new == 0) {
+    printf("cowalloc: kalloc fails\n");
+    return -1;
+  }
+  uint64 pa_old = PTE2PA(*pte);
+  memmove((void *)pa_new, (const void *)pa_old, PGSIZE);
+  kfree((void *)pa_old); // 减少COW页面的reference count
+  *pte = PA2PTE(pa_new) | PTE_FLAGS(*pte) | PTE_W;
+  return 0;
 }
