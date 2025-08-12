@@ -377,8 +377,8 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr, *a, *b;
+  struct buf *inbp, *ininbp;
 
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
@@ -391,16 +391,41 @@ bmap(struct inode *ip, uint bn)
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
+    inbp = bread(ip->dev, addr);
+    a = (uint*)inbp->data;
     if((addr = a[bn]) == 0){
       a[bn] = addr = balloc(ip->dev);
-      log_write(bp);
+      log_write(inbp);
     }
-    brelse(bp);
+    brelse(inbp);
     return addr;
   }
+  bn -= NINDIRECT;
 
+  // after subtraction, [0, 65535] is doubly-indirect block
+  if (bn < NININDIRECT){
+    // Load 1st indirect block, allocating if necessary
+    // index 10是最后一个直接映射, index 11是单层间接映射, index 12是双层间接映射
+    if ((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    inbp = bread(ip->dev, addr);
+    a = (uint*)inbp->data;
+    if ((addr = a[bn/NINDIRECT]) == 0) { // 之后的每一个映射可以吃下NINDIRECT个blocks
+      a[bn/NINDIRECT] = addr = balloc(ip->dev);
+      log_write(inbp);
+    }
+    brelse(inbp);
+
+    // Load the 2nd indirect block, allocating if necessary
+    ininbp = bread(ip->dev, addr);
+    b = (uint*)ininbp->data;
+    if ((addr = b[bn % NINDIRECT]) == 0) { // 取余数
+      b[bn % NINDIRECT] = addr = balloc(ip->dev);
+      log_write(ininbp);
+    }
+    brelse(ininbp);
+    return addr;
+  }
   panic("bmap: out of range");
 }
 
