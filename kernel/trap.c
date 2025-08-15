@@ -1,10 +1,14 @@
 #include "types.h"
+#include "fcntl.h"
 #include "param.h"
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,6 +69,50 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 13 || r_scause() == 15) { // 读或写造成的缺页中断
+    uint64 va = r_stval();
+    struct proc* p = myproc();
+    if (va > MAXVA || va > p->sz) {
+      // sanity check安全检查
+      p->killed = 1;
+    } else {
+      int found = 0;
+      for (int i = 0; i < NVMA; i++) {
+        struct vma* vma = &p->vmas[i];
+        if (vma->valid && va >= vma->addr && va < vma->addr+vma->length) {
+          // 找到对应的vma, 分配一个新的4096字节的物理页
+          // 并把对应的文件内容读进这个页, 插入进程的虚拟内存映射表
+          va = PGROUNDDOWN(va);
+          uint64 pa = (uint64)kalloc();
+          if (pa == 0) {
+            break;
+          }
+          memset((void *)pa, 0, PGSIZE);
+          ilock(vma->f->ip);
+          if(readi(vma->f->ip, 0, pa, vma->offset + va - vma->addr, PGSIZE) < 0) {
+            iunlock(vma->f->ip);
+            break;
+          }
+          iunlock(vma->f->ip);
+          int perm = PTE_U; // 权限设置
+          if (vma->prot & PROT_READ)
+            perm |= PTE_R;
+          if (vma->prot & PROT_WRITE)
+            perm |= PTE_W;
+          if (vma->prot & PROT_EXEC)
+            perm |= PTE_X;
+          if (mappages(p->pagetable, va, PGSIZE, pa, perm) < 0) {
+            kfree((void*)pa);
+            break;
+          }
+          found = 1;
+          break;
+        }
+      }
+
+      if (!found)
+        p->killed = 1;
+    } 
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {

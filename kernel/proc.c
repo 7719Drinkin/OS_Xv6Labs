@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fcntl.h"
 
 struct cpu cpus[NCPU];
 
@@ -289,6 +290,8 @@ fork(void)
   }
   np->sz = p->sz;
 
+  np->parent = p;
+
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -305,19 +308,20 @@ fork(void)
 
   pid = np->pid;
 
-  release(&np->lock);
+  for (int i = 0; i < NVMA; i++) {
+    np->vmas[i].valid = 0;
+    if (p->vmas[i].valid) {
+      memmove(&np->vmas[i], &p->vmas[i], sizeof(struct vma));
+      filedup(p->vmas[i].f);
+    }
+  }
 
-  acquire(&wait_lock);
-  np->parent = p;
-  release(&wait_lock);
-
-  acquire(&np->lock);
   np->state = RUNNABLE;
+
   release(&np->lock);
 
   return pid;
 }
-
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
@@ -350,6 +354,18 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  // unmap any mmapped region
+  for (int i = 0; i < NVMA; i++) {
+    if (p->vmas[i].valid) {
+      if (p->vmas[i].flags & MAP_SHARED) {
+        filewrite(p->vmas[i].f, p->vmas[i].addr, p->vmas[i].length);
+      }
+      fileclose(p->vmas[i].f);
+      uvmunmap(p->pagetable, p->vmas[i].addr, p->vmas[i].length / PGSIZE, 1);
+      p->vmas[i].valid = 0;
     }
   }
 
